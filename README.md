@@ -42,7 +42,7 @@ Both services are packaged as Docker containers and designed to be deployed on a
 
 - **Currency Conversion Service** retrieves exchange rates from  
   **Currency Exchange Service** and computes final amounts.  
-- Both services can be independently scaled and updated. :contentReference[oaicite:1]{index=1}  
+- Both services can be independently scaled and updated. 
 
 ---
 
