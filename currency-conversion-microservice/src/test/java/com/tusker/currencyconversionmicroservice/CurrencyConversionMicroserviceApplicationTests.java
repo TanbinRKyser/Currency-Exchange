@@ -5,6 +5,8 @@ import com.tusker.currencyconversionmicroservice.service.CurrencyConversionServi
 import com.tusker.currencyconversionmicroservice.service.CurrencyExchangeProxy;
 import feign.Request;
 import feign.RetryableException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -28,6 +30,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -42,6 +45,9 @@ class CurrencyConversionMicroserviceApplicationTests {
 	private MockMvc mockMvc;
 	@Autowired
 	private RestTemplate restTemplate;
+
+	@Autowired
+	private CircuitBreakerRegistry circuitBreakerRegistry;
 
     @MockitoBean
 	private CurrencyExchangeProxy currencyExchangeProxy;
@@ -159,6 +165,76 @@ class CurrencyConversionMicroserviceApplicationTests {
 
 		verify(currencyExchangeProxy).retrieveExchangeValue("USD", "BDT");
 	}
+
+	@Test
+	void whenCircuitBreakerForcedOpen_shouldReturn503AndNotCallProxy() throws Exception {
+		CircuitBreaker breaker = circuitBreakerRegistry.circuitBreaker("exchange");
+		breaker.transitionToForcedOpenState();
+
+		try {
+			mockMvc.perform(get("/currency-conversion-feign/from/USD/to/BDT/amount/100")
+							.accept(MediaType.APPLICATION_JSON))
+					.andExpect(status().isServiceUnavailable())
+					.andExpect(jsonPath("$.detail")
+					.value("Currency exchange service is temporarily unavailable"));
+
+			verifyNoInteractions(currencyExchangeProxy);
+		} finally {
+			breaker.reset();
+		}
+	}
+
+	@Test
+	void whenFiveFailuresOccur_circuitBreakerOpensAndRejectsSixthRequest() throws Exception {
+		CircuitBreaker breaker = circuitBreakerRegistry.circuitBreaker("exchange");
+		breaker.reset();
+
+		try {
+			// Construct a real Feign RetryableException
+			Request request = Request.create(
+					Request.HttpMethod.GET,
+					"http://localhost:8000/currency-exchange/from/USD/to/BDT",
+					Collections.emptyMap(),
+					null,
+					StandardCharsets.UTF_8
+			);
+
+			RetryableException retryableException = new RetryableException(
+					503,
+					"Service Unavailable",
+					Request.HttpMethod.GET,
+					(Long) null,
+					request
+			);
+
+			when(currencyExchangeProxy.retrieveExchangeValue("USD", "BDT"))
+					.thenThrow(retryableException);
+
+			// Make 5 requests causing failures and driving the breaker to OPEN
+			for (int i = 0; i < 5; i++) {
+				mockMvc.perform(get("/currency-conversion-feign/from/USD/to/BDT/amount/100")
+								.accept(MediaType.APPLICATION_JSON))
+						.andExpect(status().isServiceUnavailable())
+						.andExpect(jsonPath("$.detail")
+								.value("Currency exchange service is temporarily unavailable"));
+			}
+
+			// Assert the breaker has transitioned to OPEN
+			assertEquals(CircuitBreaker.State.OPEN, breaker.getState());
+
+			// 6th request: rejected directly by the open circuit breaker
+			mockMvc.perform(get("/currency-conversion-feign/from/USD/to/BDT/amount/100")
+							.accept(MediaType.APPLICATION_JSON))
+					.andExpect(status().isServiceUnavailable());
+
+			// Verify the proxy was called only for the initial 5 attempts
+			verify(currencyExchangeProxy, times(5)).retrieveExchangeValue("USD", "BDT");
+
+		} finally {
+			breaker.reset();
+		}
+	}
+
 
 	@Test
 	void calculateCurrencyConversion_shouldInvokeExchangeServiceAndReturnTotal() throws Exception {

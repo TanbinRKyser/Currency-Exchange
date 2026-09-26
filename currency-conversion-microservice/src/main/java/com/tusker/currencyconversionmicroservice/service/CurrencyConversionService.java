@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
@@ -26,6 +27,7 @@ public class CurrencyConversionService {
         this.currencyExchangeUri = currencyExchangeUri;
     }
 
+    @CircuitBreaker(name = "exchange")
     public CurrencyConversion convertCurrency( String from, String to, BigDecimal amount ) {
 
         logger.info( "convertCurrency is called from {} to {} with {}", from, to, amount );
@@ -49,6 +51,7 @@ public class CurrencyConversionService {
         );
     }
 
+    @CircuitBreaker(name = "exchange")
     public CurrencyConversion convertCurrencyUsingFeign( String from, String to, BigDecimal amount ) {
 
         CurrencyConversion currencyConversion = currencyExchangeProxy.retrieveExchangeValue( from, to);

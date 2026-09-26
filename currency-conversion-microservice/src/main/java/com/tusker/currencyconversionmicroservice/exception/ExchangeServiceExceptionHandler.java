@@ -1,6 +1,7 @@
 package com.tusker.currencyconversionmicroservice.exception;
 
 import feign.RetryableException;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -12,7 +13,7 @@ import org.springframework.web.client.ResourceAccessException;
 @RestControllerAdvice
 public class ExchangeServiceExceptionHandler {
 
-    @ExceptionHandler({RetryableException.class, ResourceAccessException.class})
+    @ExceptionHandler({RetryableException.class, ResourceAccessException.class, CallNotPermittedException.class})
     public ResponseEntity<ProblemDetail> handleExchangeUnavailable(Exception exception) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.SERVICE_UNAVAILABLE,

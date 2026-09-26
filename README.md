@@ -8,6 +8,8 @@ A small, runnable demonstration of two Spring Boot services communicating throug
 - The **conversion service** calculates a total using either a direct RestTemplate call or an OpenFeign client.
 - Docker Compose provides service-name DNS for the containerized version.
 - Kubernetes provides service-name DNS, routing to exchange replicas, health probes, and replacement of failed pods. There is no Eureka server.
+- Automated tests and GitHub Actions verify both services and their Docker builds.
+- Prometheus and Grafana provide local metrics monitoring; timeouts and a circuit breaker protect conversion requests during exchange outages.
 
 ~~~text
 Client
@@ -168,6 +170,32 @@ kubectl get pods -l app=currency-exchange
 ~~~
 
 The Deployment creates a replacement while the surviving pod remains available. Call either conversion endpoint again to verify the same result. A series of calls may show the same exchange pod because an HTTP client can reuse a connection; it does not mean the second replica is absent.
+
+## Tests and CI
+
+The exchange service has a test for a seeded rate. The conversion service tests its calculation and HTTP endpoints, including successful responses and exchange-unavailable responses. Its circuit-breaker tests check both a forced-open breaker and the transition to open after five failed calls; they verify that an open breaker rejects a request without calling the exchange client.
+
+Each service has its own Maven wrapper. Run `.\mvnw.cmd test` from each service directory on Windows, or use `verify` to run the tests as part of a full Maven build. GitHub Actions runs `mvn verify` and builds a Docker image for each service on pushes and pull requests targeting `main` or `master`. The current pipeline verifies builds; it does not publish images or deploy them.
+
+## Observability
+
+Docker Compose also starts Prometheus and Grafana. Both services expose metrics at `/actuator/prometheus`; Prometheus scrapes the exchange service every 15 seconds at `exchange:8000` and the conversion service at `conversion:8100`. With the Compose stack running, open Prometheus at `http://localhost:9090` and Grafana at `http://localhost:3000`. Add Prometheus as a Grafana data source to explore the metrics there; Grafana dashboards are not provisioned by this repository.
+
+Both Kubernetes deployments have liveness and readiness probes; the conversion deployment also has a startup probe. These are separate from Prometheus metrics: probes determine when pods can receive traffic and when they need restarting.
+
+## Handling exchange outages
+
+The conversion service uses a 3-second connection timeout and a 5-second read timeout for both its RestTemplate and OpenFeign calls to exchange. Both paths share one circuit breaker for that downstream service. It uses a five-call window and requires at least five recorded calls; a failure rate of 50% or more opens it. While open, new conversion calls are rejected without contacting exchange. After 10 seconds, it permits two trial calls to check for recovery. Connection failures and open-breaker rejections return HTTP 503 with a consistent error response.
+
+To demonstrate an outage with Compose, first start the stack as described above, then stop exchange and call either conversion endpoint several times:
+
+~~~powershell
+docker compose stop exchange
+# Call a conversion endpoint from "Try the API" using port 8100; expect HTTP 503.
+docker compose start exchange
+~~~
+
+After the breaker wait period, successful calls show that conversion has recovered. The automated tests confirm the less visible part of the behavior: once the breaker opens, the conversion service stops calling its exchange client.
 
 ## Scope
 
