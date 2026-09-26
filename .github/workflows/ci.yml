@@ -38,3 +38,5 @@ jobs:
 
       - name: Build and verify with Maven
         run: mvn -B -ntp -f ${{ matrix.module }}/pom.xml verify
+      - name: Build Docker image
+        run: docker build --tag "${{ matrix.module }}:ci" "./${{ matrix.module }}"
