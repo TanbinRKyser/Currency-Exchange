@@ -3,6 +3,8 @@ package com.tusker.currencyconversionmicroservice;
 import com.tusker.currencyconversionmicroservice.model.CurrencyConversion;
 import com.tusker.currencyconversionmicroservice.service.CurrencyConversionService;
 import com.tusker.currencyconversionmicroservice.service.CurrencyExchangeProxy;
+import feign.Request;
+import feign.RetryableException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,16 +18,19 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.client.RestTemplate;
 
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -124,6 +129,38 @@ class CurrencyConversionMicroserviceApplicationTests {
 	}
 
 	@Test
+	void getCurrencyConversionFeign_whenExchangeUnavailable_returns503() throws Exception {
+		Request request = Request.create(
+				Request.HttpMethod.GET,
+				"http://exchange:8000/currency-exchange/from/USD/to/BDT",
+				Map.of(),
+				null,
+				StandardCharsets.UTF_8
+		);
+
+		RetryableException unavailable = new RetryableException(
+				-1,
+				"Exchange unavailable",
+				Request.HttpMethod.GET,
+				(Long) null,
+				request
+		);
+
+		when(currencyExchangeProxy.retrieveExchangeValue("USD", "BDT"))
+				.thenThrow(unavailable);
+
+		mockMvc.perform(get(
+						"/currency-conversion-feign/from/{from}/to/{to}/amount/{amount}",
+						"USD", "BDT", 100
+				).accept(MediaType.APPLICATION_JSON))
+				.andExpect(status().isServiceUnavailable())
+				.andExpect(jsonPath("$.detail")
+						.value("Currency exchange service is temporarily unavailable"));
+
+		verify(currencyExchangeProxy).retrieveExchangeValue("USD", "BDT");
+	}
+
+	@Test
 	void calculateCurrencyConversion_shouldInvokeExchangeServiceAndReturnTotal() throws Exception {
 		// Arrange
 		String mockResponseJson = """
@@ -155,6 +192,23 @@ class CurrencyConversionMicroserviceApplicationTests {
 				.andExpect(jsonPath("$.environment").value("exchange-stub"));
 
 		// Verify outbound HTTP call was made
+		mockServer.verify();
+	}
+
+	@Test
+	void getCurrencyConversion_whenExchangeUnavailable_returns503() throws Exception {
+		MockRestServiceServer mockServer = MockRestServiceServer.createServer(restTemplate);
+
+		mockServer.expect(requestTo("http://localhost:8000/currency-exchange/from/USD/to/BDT"))
+				.andExpect(method(HttpMethod.GET))
+				.andRespond(withException(new IOException("Connection refused")));
+
+		mockMvc.perform(get("/currency-conversion/from/USD/to/BDT/amount/100")
+						.accept(MediaType.APPLICATION_JSON))
+				.andExpect(status().isServiceUnavailable())
+				.andExpect(jsonPath("$.detail")
+						.value("Currency exchange service is temporarily unavailable"));
+
 		mockServer.verify();
 	}
 }
