@@ -1,108 +1,174 @@
-# Spring Boot Microservices on Kubernetes
+# Currency Exchange Microservices
 
-A hands‑on reference implementation of two Spring Boot microservices containerized with Docker and deployed to Kubernetes.  
+A small, runnable demonstration of two Spring Boot services communicating through HTTP, packaged with Docker and deployed to Kubernetes.
 
-## Table of Contents
+## What it demonstrates
 
-- [Project Overview](#project-overview)  
-- [Architecture](#architecture)  
-- [Prerequisites](#prerequisites)  
-- [Getting Started](#getting-started)  
-  - [Clone the Repository](#clone-the-repository)  
-  - [Run Locally with Maven](#run-locally-with-maven)  
-- [Dockerizing the Services](#dockerizing-the-services)  
-- [Deploying to Kubernetes](#deploying-to-kubernetes)  
-- [Project Structure](#project-structure)  
-- [Technologies](#technologies)  
-- [Contributing](#contributing)  
-- [License](#license)  
-- [Author](#author)  
+- The **exchange service** returns seeded exchange rates from an in-memory H2 database.
+- The **conversion service** calculates a total using either a direct RestTemplate call or an OpenFeign client.
+- Docker Compose provides service-name DNS for the containerized version.
+- Kubernetes provides service-name DNS, routing to exchange replicas, health probes, and replacement of failed pods. There is no Eureka server.
 
----
+~~~text
+Client
+  |
+  v
+Conversion service (:8100)
+  |  RestTemplate or OpenFeign
+  v
+Exchange Service name (:8000) ---> Exchange pod 1
+                              \--> Exchange pod 2 (Kubernetes)
+~~~
 
-## Project Overview
+Both conversion paths use the CURRENCY_EXCHANGE_URI setting as the exchange host (without a port). The application appends port 8000. It defaults to http://localhost for local development, is set to http://exchange in Compose, and to http://currency-exchange in Kubernetes.
 
-This repository contains two independent Spring Boot microservices demonstrating:
+## Requirements
 
-- **Currency Exchange Service**: exposes exchange rates between currency pairs  
-- **Currency Conversion Service**: calls the exchange service to calculate converted amounts  
+- JDK 25 for running the services outside containers
+- Docker Desktop and Docker Compose for the container workflow
+- Docker Desktop Kubernetes (kind mode) and kubectl for the Kubernetes workflow
 
-Both services are packaged as Docker containers and designed to be deployed on a Kubernetes cluster. :contentReference[oaicite:0]{index=0}  
+Each service has its own Maven wrapper; a separate Maven installation is not required.
 
----
+## Run locally
 
-## Architecture
+In one PowerShell terminal:
 
-┌──────────────────────────┐ ┌────────────────────────────┐
-│ Currency Conversion Svc │ ──▶ │ Currency Exchange Svc (Eureka) │
-└──────────────────────────┘ └────────────────────────────┘
-| ▲
-│ │
-└─────────► External Clients ───────┘
+~~~powershell
+cd .\currency-exchange-service
+.\mvnw.cmd clean verify
+.\mvnw.cmd spring-boot:run
+~~~
 
-- **Currency Conversion Service** retrieves exchange rates from  
-  **Currency Exchange Service** and computes final amounts.  
-- Both services can be independently scaled and updated. 
+In a second terminal, from the repository root:
 
----
+~~~powershell
+cd .\currency-conversion-microservice
+.\mvnw.cmd clean verify
+.\mvnw.cmd spring-boot:run
+~~~
 
-## Prerequisites
+The exchange service listens on port 8000 and conversion on port 8100. Stop these local processes before starting Compose if those ports are in use.
 
-- **Java 11+**  
-- **Apache Maven 3.6+**  
-- **Docker CLI**  
-- **kubectl** (to interact with your Kubernetes cluster)  
+## Run with Docker Compose
 
----
+From the repository root:
 
-## Getting Started
+~~~powershell
+docker compose up --build -d
+docker compose ps
+~~~
 
-### Clone the Repository
+Compose sets CURRENCY_EXCHANGE_URI to http://exchange, its DNS name for the exchange container. To stop and remove the Compose containers:
 
-```bash
-git clone https://github.com/TanbinRKyser/Spring-boot-microservices-k8s.git
-cd Spring-boot-microservices-k8s
-# In one terminal:
-cd currency-exchange-service
-mvn clean spring-boot:run
+~~~powershell
+docker compose down
+~~~
 
-# In another terminal:
-cd ../currency-conversion-microservice
-mvn clean spring-boot:run
+## Run with Docker Desktop Kubernetes
 
+These steps target Docker Desktop's single-node **kind** cluster on Windows. First enable Kubernetes in Docker Desktop and check that the node is ready:
 
-Exchange service listens on localhost:8000 by default.
+~~~powershell
+kubectl config current-context
+kubectl get nodes
+~~~
 
-Conversion service listens on localhost:8100 by default.
+The context should be docker-desktop. Build the local images:
 
-# Build exchange service image
-cd currency-exchange-service
-docker build -t <your-dockerhub-username>/currency-exchange:latest .
+~~~powershell
+docker compose build
+~~~
 
-# Build conversion service image
-cd ../currency-conversion-microservice
-docker build -t <your-dockerhub-username>/currency-conversion:latest .
+Docker Desktop's kind node may not see images built in the host image store. If the images are not already in the node, save them from PowerShell:
 
+~~~powershell
+docker image save -o "$env:TEMP\currency-exchange-local.tar" currency-exchange:local
+docker image save -o "$env:TEMP\currency-conversion-local.tar" currency-conversion:local
+~~~
 
-docker push <your-dockerhub-username>/currency-exchange:latest
-docker push <your-dockerhub-username>/currency-conversion:latest
+Then import them with **Command Prompt** (cmd.exe), which preserves the binary stream:
 
-1. Create a namespace (optional):
-kubectl create namespace spring-microservices
+~~~cmd
+docker exec -i desktop-control-plane ctr -n k8s.io images import - < "%TEMP%\currency-exchange-local.tar"
+docker exec -i desktop-control-plane ctr -n k8s.io images import - < "%TEMP%\currency-conversion-local.tar"
+~~~
 
-2. Apply Deployment & Service manifests
-kubectl apply -f k8s/currency-exchange-deployment.yaml -n spring-microservices
-kubectl apply -f k8s/currency-exchange-service.yaml    -n spring-microservices
+You can check the result from PowerShell:
 
-kubectl apply -f k8s/currency-conversion-deployment.yaml -n spring-microservices
-kubectl apply -f k8s/currency-conversion-service.yaml    -n spring-microservices
+~~~powershell
+docker exec desktop-control-plane crictl images
+kubectl apply -f .\currency-exchange-service\deployment.yaml
+kubectl apply -f .\currency-conversion-microservice\deployment.yaml
+kubectl rollout status deployment/currency-exchange --timeout=180s
+kubectl rollout status deployment/currency-conversion --timeout=180s
+kubectl get pods,svc
+~~~
 
-3. Verify pods and services:
-kubectl get pods,svc -n spring-microservices
+The manifests create two exchange replicas, one conversion replica, two internal ClusterIP Services, and a ConfigMap that sets CURRENCY_EXCHANGE_URI to http://currency-exchange. Kubernetes DNS resolves that name to the exchange Service; the Service routes connections to its ready pods. No external load balancer is needed.
 
-4. Test the setup via port-forwarding or an Ingress:
-kubectl port-forward svc/currency-conversion 8100:8100 -n spring-microservices
-# then in another terminal:
-curl http://localhost:8100/convert?from=USD&to=INR&quantity=100
+After changing Java code, rebuild and re-import the affected image using the commands above, then recreate its pods so they use the new image:
 
+~~~powershell
+kubectl rollout restart deployment/currency-conversion
+kubectl rollout status deployment/currency-conversion --timeout=180s
+~~~
 
+The manifests use a local image tag and imagePullPolicy: IfNotPresent; applying an unchanged manifest alone will not update running pods.
+
+To reach conversion from your computer, run this in one terminal and leave it open:
+
+~~~powershell
+kubectl port-forward svc/currency-conversion 18100:8100
+~~~
+
+## Try the API
+
+Use port **8100** for local or Compose runs, or **18100** when using the Kubernetes port-forward. The examples below use Kubernetes.
+
+| Endpoint | Purpose |
+| --- | --- |
+| /currency-exchange/from/USD/to/BDT | Exchange rate; call on the exchange service |
+| /currency-conversion/from/USD/to/BDT/amount/100 | Conversion via RestTemplate |
+| /currency-conversion-feign/from/USD/to/BDT/amount/100 | Conversion via OpenFeign |
+
+In a second PowerShell terminal:
+
+~~~powershell
+Invoke-RestMethod http://localhost:18100/currency-conversion/from/USD/to/BDT/amount/100
+Invoke-RestMethod http://localhost:18100/currency-conversion-feign/from/USD/to/BDT/amount/100
+~~~
+
+Both conversion endpoints should return a conversionMultiple of 85.41 and a total of 8541.00. The Feign response marks its environment value with "feign"; under Kubernetes, the exchange pod name is also visible there.
+
+To call the exchange endpoint directly in Kubernetes, start a separate port-forward and use port 18000:
+
+~~~powershell
+kubectl port-forward svc/currency-exchange 18000:8000
+~~~
+
+~~~powershell
+Invoke-RestMethod http://localhost:18000/currency-exchange/from/USD/to/BDT
+~~~
+
+## Demonstrate scaling and self-healing
+
+The exchange Deployment starts with two replicas. Check the ready pods:
+
+~~~powershell
+kubectl get pods -l app=currency-exchange
+kubectl describe svc currency-exchange
+~~~
+
+The Service should list two endpoints. To demonstrate replacement, choose one exchange pod name from the first command and delete that pod:
+
+~~~powershell
+kubectl delete pod NAME_OF_ONE_EXCHANGE_POD
+kubectl get pods -l app=currency-exchange
+~~~
+
+The Deployment creates a replacement while the surviving pod remains available. Call either conversion endpoint again to verify the same result. A series of calls may show the same exchange pod because an HTTP client can reuse a connection; it does not mean the second replica is absent.
+
+## Scope
+
+Rates are intentionally seeded in an in-memory H2 database: USD, EUR, GBP, and SAR to BDT. They reset with the exchange service, and no external rate provider is involved. This project focuses on service-to-service calls and container orchestration rather than live financial data.

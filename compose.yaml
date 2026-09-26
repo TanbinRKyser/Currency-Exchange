@@ -1,0 +1,16 @@
+services:
+  exchange:
+    build: ./currency-exchange-service
+    image: currency-exchange:local
+    ports:
+      - "8000:8000"
+
+  conversion:
+    build: ./currency-conversion-microservice
+    image: currency-conversion:local
+    environment:
+      CURRENCY_EXCHANGE_URI: http://exchange
+    ports:
+      - "8100:8100"
+    depends_on:
+      - exchange

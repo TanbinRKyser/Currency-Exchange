@@ -7,12 +7,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 
 
-//@FeignClient(name="currency-exchange", url="localhost:8000")
-//@FeignClient("currency-exchange")
-
-
-//CHANGE-KUBERNETES
-//@FeignClient(name = "currency-exchange", url = "${CURRENCY_EXCHANGE_SERVICE_HOST:http://localhost}:8000")
 @FeignClient(name = "currency-exchange", url = "${CURRENCY_EXCHANGE_URI:http://localhost}:8000")
 public interface CurrencyExchangeProxy {
 

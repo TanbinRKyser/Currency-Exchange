@@ -23,12 +23,34 @@ spec:
         app: currency-conversion
     spec:
       containers:
-        - image: foxcatcher2426/spring-microservices-currency-conversion-service:0.0.12-SNAPSHOT
+        - image: currency-conversion:local
           imagePullPolicy: IfNotPresent
           name: spring-microservices-currency-conversion-service
           envFrom:
             - configMapRef:
                 name: currency-conversion
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8100
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8100
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8100
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 384Mi
+            limits:
+              memory: 768Mi
 #          env:
 #            - name: CURRENCY_EXCHANGE_URI
 #              value: http://currency-exchange
@@ -49,7 +71,7 @@ spec:
   selector:
     app: currency-conversion
   sessionAffinity: None
-  type: LoadBalancer
+  type: ClusterIP
 ---
 apiVersion: v1
 data:

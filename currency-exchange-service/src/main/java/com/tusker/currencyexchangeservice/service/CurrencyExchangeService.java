@@ -15,7 +15,7 @@ public class CurrencyExchangeService {
 
 
     public CurrencyExchange getCurrencyFromAndTo( String from, String to ){
-        CurrencyExchange currencyExchange = currencyExchangeRepository.fromAndTo( from, to );
+        CurrencyExchange currencyExchange = currencyExchangeRepository.findByFromAndTo( from, to );
 
         if( currencyExchange == null )
             throw new RuntimeException("Unable to find data for " + from + " to " + to );
