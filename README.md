@@ -11,16 +11,7 @@ A small, runnable demonstration of two Spring Boot services communicating throug
 - Automated tests and GitHub Actions verify both services and their Docker builds.
 - Prometheus and Grafana provide local metrics monitoring; timeouts and a circuit breaker protect conversion requests during exchange outages.
 
-~~~text
-Client
-  |
-  v
-Conversion service (:8100)
-  |  RestTemplate or OpenFeign
-  v
-Exchange Service name (:8000) ---> Exchange pod 1
-                              \--> Exchange pod 2 (Kubernetes)
-~~~
+![Currency Exchange Microsercies App architecture](currency_exchange_diagram.png)
 
 Both conversion paths use the CURRENCY_EXCHANGE_URI setting as the exchange host (without a port). The application appends port 8000. It defaults to http://localhost for local development, is set to http://exchange in Compose, and to http://currency-exchange in Kubernetes.
 
