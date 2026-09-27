@@ -40,3 +40,37 @@ jobs:
         run: mvn -B -ntp -f ${{ matrix.module }}/pom.xml verify
       - name: Build Docker image
         run: docker build --tag "${{ matrix.module }}:ci" "./${{ matrix.module }}"
+
+  publish-images:
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        module:
+          - currency-exchange-service
+          - currency-conversion-microservice
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.module }}" >> "$GITHUB_ENV"
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./${{ matrix.module }}
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
